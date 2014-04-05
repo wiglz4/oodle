@@ -1,0 +1,242 @@
+Package cps450.oodle;
+
+
+Helpers
+
+  tab                 = 9;
+  line_feed           = 10;
+  carriage_return     = 13;
+  space               = ' ';
+  single_quote        = ''';
+  double_quote        = '"';
+  letter              = [['a'..'z'] + ['A'..'Z']];
+  octal               = ['0'..'7'];
+  digit               = ['0'..'9'];
+  escape              = '\' ( 't' | 'f' | 'n' | 'r' | '*' | '\' | double_quote | octal octal octal );
+  printable           = [0..127];
+  not_lf_or_cr        = [printable - [line_feed + carriage_return]];
+  end_of_line         = (line_feed | carriage_return | carriage_return line_feed);
+
+
+Tokens
+
+  newline              = end_of_line;
+  comment              = '~' not_lf_or_cr*;
+  whitespace           = (tab | space)*;
+  continuation         = '_' end_of_line;
+  
+  integer_literal      = ('-' digit+ | digit+);
+  
+  string_literal       = double_quote ([not_lf_or_cr - [double_quote + '\']] | escape)* double_quote;
+  unterminated_string  = double_quote ([not_lf_or_cr - [double_quote + '\']] | escape)*;
+  illegal_string       = double_quote ([not_lf_or_cr - double_quote] | '\"')* double_quote;
+  
+  boolean              = 'boolean'; 
+  begin                = 'begin'; 
+  classkey             = 'class'; 
+  else                 = 'else'; 
+  end                  = 'end'; 
+  false                = 'false'; 
+  from                 = 'from'; 
+  if                   = 'if'; 
+  inherits             = 'inherits'; 
+  int                  = 'int'; 
+  is                   = 'is'; 
+  loop                 = 'loop'; 
+  me                   = 'me'; 
+  new                  = 'new'; 
+  not                  = 'not'; 
+  null                 = 'null'; 
+  string               = 'string'; 
+  then                 = 'then'; 
+  true                 = 'true'; 
+  while                = 'while';
+  and                  = 'and';
+  or                   = 'or';
+  
+  concatenate          = '&'; 
+  plus                 = '+'; 
+  minus                = '-'; 
+  multiply             = '*';
+  divide               = '/';
+  greater              = '>';
+  greater_equal        = '>=';
+  equals               = '=';
+  assignment           = ':=';
+  l_paren              = '(';
+  r_paren              = ')';
+  l_bracket            = '[';
+  r_bracket            = ']';
+  comma                = ',';
+  semicolon            = ';';
+  colon                = ':';
+  dot                  = '.';
+  
+  identifier           = ('_' | letter) (letter | digit | '_')*;
+  
+  unknown_character    = printable;
+
+
+Ignored Tokens
+
+  comment, whitespace, continuation;
+
+  
+Productions
+
+  start {-> start } = [begin]:T.newline* class_def newlineclass* [end]:T.newline* {-> New start([class_def, newlineclass.class_def]) };
+  
+  newlineclass {-> class_def} = T.newline+ class_def {-> class_def};
+  
+  class_def {-> class_def } = T.classkey [first]:T.identifier [middle]:inheriting? T.is T.newline+ 
+    var_decl*
+    method_decl*
+    T.end [last]:T.identifier {-> New class_def(first, middle.extends, [var_decl.var_decl], [method_decl.method_decl], last)};
+
+  inheriting{-> extends} = T.inherits T.from T.identifier {-> New extends(identifier)};
+  
+  var_decl {-> var_decl} = T.identifier col_type? assignment_expression? T.newline+ {-> New var_decl(identifier, col_type.type, assignment_expression.expression)};
+  
+  col_type{-> type} = T.colon type{-> type};
+  
+  assignment_expression{-> expression} = T.assignment expression {-> expression};
+  
+  method_decl {-> method_decl} = [first_id]:T.identifier T.l_paren argument_decl_list? T.r_paren col_type? T.is [first]:T.newline+
+    var_decl*
+    T.begin [mid]:T.newline+
+    statement_list
+    T.end [second_id]:T.identifier [last]:T.newline+ {-> New method_decl(first_id, [argument_decl_list.argument_decl], col_type.type, [var_decl.var_decl], [statement_list.statement], second_id)};
+    
+  argument_decl_list{-> argument_decl*} = argument_decl_list_semicolon* argument_decl {-> [argument_decl_list_semicolon.argument_decl, argument_decl]};
+      
+  argument_decl_list_semicolon{-> argument_decl} = argument_decl T.semicolon{-> argument_decl};
+  
+  argument_decl{-> argument_decl} = T.identifier col_type{-> New argument_decl(identifier, col_type.type)};
+  
+  type { -> type} = {integer} T.int {-> New type.integer(int)}
+    | {string} T.string {-> New type.string(string)}
+    | {boolean} T.boolean {-> New type.boolean(boolean)}
+    | {identify} T.identifier {-> New type.identify(identifier)}
+    | {recursive} type T.l_bracket expression? T.r_bracket {-> New type.recursive(type, expression)};
+  
+  statement_list {-> statement*} = statement_nl* {-> [statement_nl.statement]};
+    
+  statement_nl {-> statement} = statement T.newline+ {-> statement};
+  
+  statement {-> statement}= {assstmt} assignment_stmt {-> assignment_stmt.statement }
+    | {ifstmt} if_stmt {-> if_stmt.statement}
+    | {lpstmt} loop_stmt {-> loop_stmt.statement}
+    | {clstmt} call_stmt {-> call_stmt.statement};
+    
+  assignment_stmt {-> statement} = T.identifier [first]:bracket_expr* T.assignment [last]:expression {-> New statement.assstmt(identifier, [first.expression, last.expression])};
+    
+  bracket_expr {-> expression} = T.l_bracket expression T.r_bracket{-> expression};
+    
+  if_stmt {-> statement} = [first]:T.if expression T.then T.newline+
+  statement_list optional_else? T.end [last]:T.if {-> New statement.ifstmt(expression, [statement_list.statement], [optional_else.statement])};
+    
+  optional_else{-> statement* } = T.else T.newline+ statement_list {-> [statement_list.statement] };
+      
+  loop_stmt {-> statement} = [first]:T.loop T.while expression T.newline+
+  statement_list T.end [last]:T.loop {-> New statement.lpstmt(expression, [statement_list.statement])};
+  
+  call_stmt {-> statement} = expression_dot? T.identifier T.l_paren expression_list? T.r_paren {-> New statement.clstmt(expression_dot.expression, identifier, [expression_list.expression])};
+  
+  expression_dot {-> expression} = expression_lvl0 T.dot {-> expression_lvl0.expression};
+  
+  expression_comma {-> expression} = expression T.comma {-> expression};
+      
+  expression_list {-> expression*} = expression_comma* expression {-> [expression_comma.expression, expression]};
+
+  expression {-> expression} = expression_lvl7 {-> expression_lvl7.expression};
+   
+  expression_lvl7 {-> expression} = {or} expression_lvl7 T.or expression_lvl6  {-> New expression.or(expression_lvl7.expression, expression_lvl6.expression)}
+    | {pass} expression_lvl6 {-> expression_lvl6.expression};
+    
+  expression_lvl6 {-> expression} = {and} expression_lvl6 T.and expression_lvl5 {-> New expression.and(expression_lvl6.expression, expression_lvl5.expression)}
+    | {pass} expression_lvl5 {-> expression_lvl5.expression}; 
+    
+  expression_lvl5 {-> expression} = {gt} [lhs]:expression_lvl4 T.greater [rhs]:expression_lvl4 {-> New expression.gt(lhs.expression, rhs.expression)}
+    | {gte} [lhs]:expression_lvl4 T.greater_equal [rhs]:expression_lvl4 {-> New expression.gte(lhs.expression, rhs.expression)}
+    | {eq} [lhs]:expression_lvl4 T.equals [rhs]:expression_lvl4 {-> New expression.eq(lhs.expression, rhs.expression)}
+    | {pass} expression_lvl4 {-> expression_lvl4.expression}; 
+    
+  expression_lvl4 {-> expression} = {cat} expression_lvl4 T.concatenate expression_lvl3 {-> New expression.cat(expression_lvl4.expression, expression_lvl3.expression)}
+    | {pass} expression_lvl3 {-> expression_lvl3.expression};
+      
+  expression_lvl3 {-> expression} = {sub} expression_lvl3 T.minus expression_lvl2 {-> New expression.sub(expression_lvl3.expression, expression_lvl2.expression)}
+    | {add} expression_lvl3 T.plus expression_lvl2 {-> New expression.add(expression_lvl3.expression, expression_lvl2.expression)}
+    | {pass} expression_lvl2 {-> expression_lvl2.expression}; 
+        
+  expression_lvl2 {-> expression} = {mul} expression_lvl2 T.multiply expression_lvl1 {-> New expression.mul(expression_lvl2.expression, expression_lvl1.expression)}
+    | {div} expression_lvl2 T.divide expression_lvl1 {-> New expression.div(expression_lvl2.expression, expression_lvl1.expression)}
+    | {pass} expression_lvl1 {-> expression_lvl1.expression};
+
+  expression_lvl1 {-> expression} = {not} T.not expression_lvl1 {-> expression_lvl1.expression}
+    | {neg} T.minus expression_lvl0 {-> expression_lvl0.expression}
+    | {pos} T.plus expression_lvl0 {-> expression_lvl0.expression}
+    | {pass} expression_lvl0 {-> expression_lvl0.expression};
+    
+  expression_lvl0 {-> expression} = {callxpr} expression_dot? T.identifier T.l_paren expression_list? T.r_paren {-> New expression.callxpr(expression_dot.expression, identifier, [expression_list.expression])}
+    | {id} T.identifier bracket_expr* {-> New expression.id(identifier, [bracket_expr.expression])}
+    | {strlit} T.string_literal {-> New expression.strlit(string_literal)}
+    | {intlit} T.integer_literal {-> New expression.intlit(integer_literal)}
+    | {tr} T.true {-> New expression.tr(true)}
+    | {fl} T.false {-> New expression.fl(false)}
+    | {null} T.null {-> New expression.null(null)}
+    | {me} T.me {-> New expression.me(me)}
+    | {newtype} T.new type {-> New expression.newtype(type)}
+    | {paren} T.l_paren expression T.r_paren {-> expression.expression};
+
+Abstract Syntax Tree
+
+  start = class_def*;
+  
+  class_def = [first]:identifier [middle]:extends? var_decl* method_decl* [last]:identifier;
+  
+  extends = identifier;
+  
+  var_decl = identifier type? expression?;
+    
+  col_type = type;
+  
+  method_decl = [first_id]:identifier argument_decl* type? var_decl* statement* [second_id]:identifier;
+  
+  argument_decl = identifier type;
+  
+  argument_decl_list_semicolon = argument_decl;
+  
+  type = {integer} int
+    | {string} string
+    | {boolean} boolean
+    | {identify} identifier
+    | {recursive} type expression?;
+  
+  statement = {assstmt} identifier expression*
+    | {ifstmt} expression [true]:statement* [false]:statement*
+    | {lpstmt} expression statement*
+    | {clstmt} [lhs]:expression? identifier [rhs]:expression*;
+  
+  expression = {or} [lhs]:expression [rhs]:expression
+    | {and} [lhs]:expression [rhs]:expression
+    | {gt} [lhs]:expression [rhs]:expression
+    | {gte} [lhs]:expression [rhs]:expression
+    | {eq} [lhs]:expression [rhs]:expression
+    | {cat} [lhs]:expression [rhs]:expression
+    | {sub} [lhs]:expression [rhs]:expression
+    | {add} [lhs]:expression [rhs]:expression
+    | {mul} [lhs]:expression [rhs]:expression
+    | {div} [lhs]:expression [rhs]:expression
+    | {not} expression
+    | {neg} expression
+    | {pos} expression
+    | {callxpr} [lhs]:expression? identifier [rhs]:expression*
+    | {id} identifier expression*
+    | {strlit} string_literal
+    | {intlit} integer_literal
+    | {tr} true
+    | {fl} false
+    | {null} null
+    | {me} me
+    | {newtype} type
+    | {paren} expression;
